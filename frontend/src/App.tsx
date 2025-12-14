@@ -38,6 +38,10 @@ function RoomPage() {
   const [status, setStatus] = useState("disconnected");
   const wsRef = useRef<WebSocket | null>(null);
 
+  const [copied, setCopied] = useState(false);
+
+  const [users, setUsers] = useState(0);
+
   const shareLink = useMemo(() => `${window.location.origin}/room/${encodeURIComponent(room)}`, [room]);
 
   useEffect(() => {
@@ -47,7 +51,15 @@ function RoomPage() {
     ws.onopen = () => setStatus("connected");
     ws.onclose = () => setStatus("disconnected");
     ws.onerror = () => setStatus("error");
-    ws.onmessage = (event) => setText(String(event.data));
+    ws.onmessage = (event) => {
+      const msg = JSON.parse(String(event.data));
+
+      if(msg.type === "presence"){
+        setUsers(msg.count)
+      } else if(msg.type == "doc") {
+        setText(msg.text);
+      }
+    }
 
     return () => ws.close();
 
@@ -59,14 +71,15 @@ function RoomPage() {
 
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(newText);
+      ws.send(JSON.stringify({ type: "edit", text: newText }));
     }
   }
 
   async function copyLink() {
     try{
       await navigator.clipboard.writeText(shareLink);
-      alert("Copied link!");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
     } catch {
       alert("Could not copy. Copy from the address bar.");
     }
@@ -76,12 +89,16 @@ function RoomPage() {
     <div style={{ padding: 16 }}>
       <div style={{ marginBottom: 12 }}>
         <h2 style={{ margin: 0 }}>Room ID: {room}</h2>
+
         <div style={{ marginTop: 6 }}>
           <span>Status: {status}</span>
+          <span style={{ marginLeft: 12 }}>Users: {users}</span>
+
           <button onClick={copyLink} style={{ marginLeft: 12 }}>
-            Copy link
+            {copied ? "Copied!" : "Copy link"}
           </button>
         </div>
+
         <div style={{ marginTop: 6, fontSize: 12 }}>{shareLink}</div>
       </div>
 
