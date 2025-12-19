@@ -193,6 +193,9 @@ export default function RoomPage() {
     const time = Date.now();
     const ttl = 5000;
 
+    const W = 650;
+    const H = 350;
+
     const nextCarrets: Record<string, CaretRect> = {};
     const nextHighlights: Record<string, HighlightRect[]> = {};
 
@@ -200,12 +203,14 @@ export default function RoomPage() {
         if(time - c.ts >= ttl) continue;
 
         if(c.start !== c.end ) {
-            const rects = getHighlightRects(el, c.start, c.end);
+            const rects = getHighlightRects(el, c.start, c.end).filter(r => 
+              r.x + r.w > 0 && r.x < W && r.y + r.h > 0 && r.y < H
+            );
             if (rects.length) nextHighlights[id] = rects;
         }
         else{
             const r = caretRectFromIndex(el, c.start);
-            if(r) nextCarrets[id] = r;
+            if(r && r.x + 2 > 0 && r.x < W && r.y + r.h > 0 && r.y < H) nextCarrets[id] = r;
         }
     }
 
@@ -318,6 +323,38 @@ export default function RoomPage() {
     }, 40);
   }
 
+  function syncAndBroadcast(){
+    const el = editorRef.current;
+    if (!el) return;
+
+    const newText = el.textContent ?? "";
+    
+    if(newText === text) {
+      scheduleSendCursor();
+      return;
+    }
+    
+    setText(newText);
+
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "edit", text: newText, clientId }));
+    }
+
+    scheduleSendCursor();
+  }
+  function execWithFallback(exec: () => void) {
+    exec();
+
+    requestAnimationFrame(() => {
+      const el = editorRef.current;
+      if (!el) return;
+
+      const domText = el.textContent ?? "";
+      if (domText !== text) syncAndBroadcast();
+    })
+  }
+
   return (
     <div style={{ padding: 16 }}>
       <div style={{ marginBottom: 12 }}>
@@ -351,18 +388,21 @@ export default function RoomPage() {
                 fontFamily: "inherit",
                 fontSize: "inherit",
             }}
-            onKeyUp={scheduleSendCursor}
-            onMouseUp={scheduleSendCursor}
-            onInput={(e) => {
-                const newText = e.currentTarget.textContent ?? "";
-                setText(newText);
-
-                const ws = wsRef.current;
-                if (ws && ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: "edit", text: newText, clientId }));
-                }
-                scheduleSendCursor();
+            onKeyDown={(e) => {
+              if(e.key === "Enter") {
+                e.preventDefault();
+                execWithFallback(() => document.execCommand("insertLineBreak"));
+              }
             }}
+            onPaste={(e) => {
+              e.preventDefault();
+              const plain = e.clipboardData.getData("text/plain")
+              execWithFallback(() => document.execCommand("insertText", false, plain));
+            }}
+            onMouseUp={scheduleSendCursor}
+            onKeyUp={scheduleSendCursor}
+            onMouseDown={scheduleSendCursor}
+            onInput={syncAndBroadcast}
         />
 
         <div
@@ -399,8 +439,8 @@ export default function RoomPage() {
               title={labelFromId(id)}
               style={{
                 position: "absolute",
-                left: r.x, // + padding (10) so it lines up with text
-                top: r.y,  // + padding (10)
+                left: r.x,
+                top: r.y,  
                 width: 2,
                 height: r.h,
                 background: colorFromId(id),
