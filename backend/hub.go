@@ -5,11 +5,23 @@ import(
 	"github.com/gorilla/websocket"
 )
 
+type EditEvent struct {
+	Text string
+	ClientID string
+}
+
+type CursorEvent struct {
+	ClientID string
+	Start int
+	End int
+}
+
 type Hub struct {
 	clients map[*websocket.Conn]bool
 	register chan *websocket.Conn
 	unregister chan *websocket.Conn
-	broadcast chan string
+	broadcast chan EditEvent
+	cursor chan CursorEvent
 	currentText string
 	users int
 }
@@ -19,7 +31,8 @@ func NewHub() *Hub {
 		clients: make(map[*websocket.Conn]bool),
 		register: make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
-		broadcast: make(chan string),
+		broadcast: make(chan EditEvent),
+		cursor: make(chan CursorEvent),
 		currentText: "",
 		users: 0,
 	}
@@ -28,12 +41,21 @@ func NewHub() *Hub {
 type DocMsg struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+	ClientID string `json:"clientId"`
 }
 
 type PresenceMsg struct {
-	Type  string `json:"type"`
-	Count int    `json:"count"`
+	Type string `json:"type"`
+	Count int `json:"count"`
 }
+
+type CursorMsg struct {
+	Type string `json:"type"`
+	ClientID string `json:"clientId"`
+	Start int `json:"start"`
+	End int `json:"end"`
+}
+
 
 func (h *Hub) sendJSON(conn *websocket.Conn, v any) error {
 	b, err := json.Marshal(v)
@@ -67,7 +89,7 @@ func (h *Hub) Run() {
 		case conn := <- h.register:
 			h.clients[conn] = true
 			h.users++
-			_ = h.sendJSON(conn, DocMsg{Type: "doc", Text: h.currentText})
+			_ = h.sendJSON(conn, DocMsg{Type: "doc", Text: h.currentText, ClientID: ""})
 			h.broadcastPresence()
 		
 		case conn := <- h.unregister:
@@ -79,8 +101,11 @@ func (h *Hub) Run() {
 			}
 		
 		case msg := <- h.broadcast:
-			h.currentText = msg
-			h.broadcastJSON(DocMsg{Type: "doc", Text: h.currentText})
+			h.currentText = msg.Text
+			h.broadcastJSON(DocMsg{Type: "doc", Text: h.currentText, ClientID: msg.ClientID})
+
+		case c := <- h.cursor:
+			h.broadcastJSON(CursorMsg{Type: "cursor", ClientID: c.ClientID, Start: c.Start, End:c.End})
 		}
 	}
 }

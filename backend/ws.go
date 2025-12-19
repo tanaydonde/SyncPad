@@ -10,6 +10,9 @@ import (
 type EditMsg struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+	ClientID string `json:"clientId"`
+	Start int `json:"start,omitempty"`
+	End int `json:"end,omitempty"`
 }
 
 var upgrader = websocket.Upgrader{
@@ -40,18 +43,18 @@ func wsHandler(w http.ResponseWriter, r *http.Request){
 
 		if err != nil {
 			fmt.Println("read error:", err)
-			hub.unregister <- conn
 			return
 		}
 
 		var em EditMsg
 		if err := json.Unmarshal(msg, &em); err != nil {
-			hub.broadcast <- string(msg)
 			continue
 		}
-
-		if em.Type == "edit" {
-			hub.broadcast <- em.Text
+		switch(em.Type){
+		case("edit"):
+			hub.broadcast <- EditEvent{Text: em.Text, ClientID: em.ClientID }
+		case("cursor"):
+			hub.cursor <- CursorEvent{ClientID: em.ClientID, Start: em.Start, End: em.End}
 		}
 	}
 }
