@@ -51,10 +51,16 @@ func wsHandler(w http.ResponseWriter, r *http.Request){
 			continue
 		}
 		switch(em.Type){
+		
 		case("edit"):
 			hub.broadcast <- EditEvent{Text: em.Text, ClientID: em.ClientID }
+		
 		case("cursor"):
 			hub.cursor <- CursorEvent{ClientID: em.ClientID, Start: em.Start, End: em.End}
+		
+		case("cursor_request"):
+			hub.cursorRequest <- CursorRequestEvent{From: em.ClientID}
 		}
+		
 	}
 }

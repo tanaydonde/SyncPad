@@ -5,6 +5,8 @@ type RemoteCursor = { start: number, end: number, ts: number};
 
 type CaretRect = { x: number; y: number; h: number };
 
+type HighlightRect = { x: number, y : number, w: number, h: number};
+
 function getTextNodeAndOffset(root: HTMLElement, index: number) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode() as Text | null;
@@ -16,12 +18,6 @@ function getTextNodeAndOffset(root: HTMLElement, index: number) {
         remaining -= length;
         node = walker.nextNode() as Text | null;
     }
-
-    // const lastText = root.lastChild;
-    // if(lastText && lastText.nodeType === Node.TEXT_NODE) {
-    //     const t = lastText as Text;
-    //     return { node: t, offset: t.nodeValue?.length ?? 0 };
-    // }
 
     const t = document.createTextNode(root.textContent ?? "");
     root.textContent = "";
@@ -51,8 +47,36 @@ function caretRectFromIndex(root: HTMLElement, index: number): CaretRect | null 
         y: rect.top - rootRect.top,
         h: rect.height || 16
     }
+}
 
-}   
+function getHighlightRects(root: HTMLElement, startIdx: number, endIdx: number): HighlightRect[] {
+    const start = getTextNodeAndOffset(root, startIdx);
+    const end = getTextNodeAndOffset(root, endIdx);
+
+    const range = document.createRange();
+    range.setStart(start.node, start.offset);
+    range.setEnd(end.node, end.offset);
+
+    const rootRect = root.getBoundingClientRect();
+    const rects = Array.from(range.getClientRects());
+
+    return rects.map((r) => ({
+        x: r.left - rootRect.left,
+        y: r.top - rootRect.top,
+        w: r.width,
+        h: r.height || 16,
+    })).filter((r) => r.w > 0 && r.h > 0)
+}
+
+function colorFromId(id: string) {
+    let h = 0;
+    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+    return `hsl(${h % 360}, 70%, 45%)`;
+}
+
+function labelFromId(id: string) {
+    return `User ${id.slice(-4)}`;
+}
 
 export default function RoomPage() {
   const {roomId} = useParams();
@@ -81,6 +105,7 @@ export default function RoomPage() {
 
   const [remoteCursors, setRemoteCursors] = useState<Record<string, RemoteCursor>>({});
   const [remoteRects, setRemoteRects] = useState<Record<string, CaretRect>>({});
+  const [remoteHighlights, setRemoteHighlights] = useState<Record<string, HighlightRect[]>>({});
 
   useEffect(() => {
     let closedByCleanup = false;
@@ -95,6 +120,8 @@ export default function RoomPage() {
       ws.onopen = () => {
         attempt = 0;
         setStatus("connected");
+        ws.send(JSON.stringify({ type: "cursor_request", clientId }));
+        sendCursorNow();
       }
 
       ws.onmessage = (event) => {
@@ -105,10 +132,13 @@ export default function RoomPage() {
         } else if(msg.type === "doc" && msg.clientId !== clientId) {
           setText(msg.text);
         } else if(msg.type == "cursor" && msg.clientId !== clientId) {
+
           setRemoteCursors(prev => ({
             ...prev,
             [msg.clientId]: {start: msg.start, end: msg.end, ts: Date.now()}
           }));
+        } else if(msg.type === "cursor_request" && msg.from !== clientId) {
+            sendCursorNow();
         }
       }
 
@@ -162,18 +192,25 @@ export default function RoomPage() {
 
     const time = Date.now();
     const ttl = 5000;
-    const contentLen = (el.textContent ?? "").length;
-    const next: Record<string, CaretRect> = {};
+
+    const nextCarrets: Record<string, CaretRect> = {};
+    const nextHighlights: Record<string, HighlightRect[]> = {};
 
     for(const [id, c] of Object.entries(remoteCursors)) {
         if(time - c.ts >= ttl) continue;
 
-        const idx = Math.max(0, Math.min(c.end, contentLen))
-        const r = caretRectFromIndex(el, idx);
-        if(r) next[id] = r;
+        if(c.start !== c.end ) {
+            const rects = getHighlightRects(el, c.start, c.end);
+            if (rects.length) nextHighlights[id] = rects;
+        }
+        else{
+            const r = caretRectFromIndex(el, c.start);
+            if(r) nextCarrets[id] = r;
+        }
     }
 
-    setRemoteRects(next);
+    setRemoteHighlights(nextHighlights);
+    setRemoteRects(nextCarrets);
   }, [remoteCursors, text])
 
   useEffect(() => {
@@ -187,6 +224,39 @@ export default function RoomPage() {
     el.addEventListener("scroll", onScroll);
     return () => el.removeEventListener("scroll", onScroll);
   }, [])
+
+  useEffect(() => {
+    const ttl = 5000
+    const interval = window.setInterval(() => {
+        const time = Date.now();
+        setRemoteCursors(prev => {
+            let changed = false;
+            const next: Record<string, RemoteCursor> = {};
+            for(const [id, c] of Object.entries(prev)) {
+                if(time - c.ts < ttl) next[id] = c;
+                else changed = true;
+            }
+            return changed ? next : prev;
+        });
+    }, 1000);
+
+    return () => window.clearInterval(interval);
+  }, [])
+
+  useEffect(() => {
+    const ws = wsRef.current;
+    if (!ws || status !== "connected") return;
+
+    const tick = () => {
+        if (document.visibilityState === "visible") {
+            sendCursorNow();
+        }
+    };
+
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+    
+  }, [status, room, clientId]);
 
   async function copyLink() {
     try{
@@ -248,16 +318,6 @@ export default function RoomPage() {
     }, 40);
   }
 
-  function colorFromId(id: string) {
-    let h = 0;
-    for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
-    return `hsl(${h % 360}, 70%, 45%)`;
-  }
-
-  function labelFromId(id: string) {
-    return `User ${id.slice(-4)}`;
-  }
-
   return (
     <div style={{ padding: 16 }}>
       <div style={{ marginBottom: 12 }}>
@@ -315,6 +375,24 @@ export default function RoomPage() {
             pointerEvents: "none",
           }}
         >
+            {Object.entries(remoteHighlights).flatMap(([id, rects]) =>
+                rects.map((r, i) => (
+                <div
+                    key={`${id}-hl-${i}`}
+                    title={labelFromId(id)}
+                    style={{
+                    position: "absolute",
+                    left: r.x,
+                    top: r.y,
+                    width: r.w,
+                    height: r.h,
+                    background: colorFromId(id),
+                    opacity: 0.22,
+                    borderRadius: 3,
+                    }}
+                />
+                ))
+            )}
             {Object.entries(remoteRects).map(([id, r]) => (
             <div
               key={id}

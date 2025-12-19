@@ -16,12 +16,22 @@ type CursorEvent struct {
 	End int
 }
 
+type CursorRequestEvent struct {
+	From string
+}
+
+type CursorRequestMsg struct {
+	Type string `json:"type"`
+	From string `json:"from"`
+}
+
 type Hub struct {
 	clients map[*websocket.Conn]bool
 	register chan *websocket.Conn
 	unregister chan *websocket.Conn
 	broadcast chan EditEvent
 	cursor chan CursorEvent
+	cursorRequest chan CursorRequestEvent
 	currentText string
 	users int
 }
@@ -33,6 +43,7 @@ func NewHub() *Hub {
 		unregister: make(chan *websocket.Conn),
 		broadcast: make(chan EditEvent),
 		cursor: make(chan CursorEvent),
+		cursorRequest: make(chan CursorRequestEvent),
 		currentText: "",
 		users: 0,
 	}
@@ -106,6 +117,9 @@ func (h *Hub) Run() {
 
 		case c := <- h.cursor:
 			h.broadcastJSON(CursorMsg{Type: "cursor", ClientID: c.ClientID, Start: c.Start, End:c.End})
+
+		case req := <- h.cursorRequest:
+			h.broadcastJSON(CursorRequestMsg{Type: "cursor_request", From: req.From})
 		}
 	}
 }
