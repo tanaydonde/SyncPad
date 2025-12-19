@@ -1,5 +1,40 @@
 import { useEffect, useRef, useState, useMemo } from "react";
 import { useParams } from "react-router-dom";
+import "katex/dist/katex.min.css";
+import katex from "katex";
+
+function escapeHtml(s: string) {
+  return s
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function renderLatexMixed(input: string) {
+  let html = escapeHtml(input)
+
+  //for $$ ... $$ (centers it)
+  html = html.replace(/\$\$([\s\S]+?)\$\$/g, (_, expr) => {
+    return katex.renderToString(String(expr).trim(), {
+      displayMode: true,
+      throwOnError: false,
+    });
+  });
+
+
+  //for $ ... $ 
+  html = html.replace(/\$([^\n$]+?)\$/g, (_, expr) => {
+    return katex.renderToString(String(expr).trim(), {
+      displayMode: false,
+      throwOnError: false,
+    });
+  });
+
+  html = html.replace(/\n/g, "<br/>");
+  return html;
+}
 
 type RemoteCursor = { start: number, end: number, ts: number};
 
@@ -193,7 +228,7 @@ export default function RoomPage() {
     const time = Date.now();
     const ttl = 5000;
 
-    const W = 650;
+    const W = 500;
     const H = 350;
 
     const nextCarrets: Record<string, CaretRect> = {};
@@ -356,98 +391,127 @@ export default function RoomPage() {
   }
 
   return (
-    <div style={{ padding: 16 }}>
-      <div style={{ marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Room ID: {room}</h2>
+    <div
+      style={{
+        background: "#1f1f1f",
+        display: "flex",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: 40,
+      }}
+    >
+      <div style = {{width: 1030}}>
+        <div style={{ padding: 16 }}>
+          <div style={{ marginBottom: 12 }}>
+            <h2 style={{ margin: 0 }}>Room ID: {room}</h2>
+            <div style={{ marginTop: 6 }}>
+              <span>Status: {status}</span>
+              <span style={{ marginLeft: 12 }}>Users: {users}</span>
 
-        <div style={{ marginTop: 6 }}>
-          <span>Status: {status}</span>
-          <span style={{ marginLeft: 12 }}>Users: {users}</span>
+              <button onClick={copyLink} style={{ marginLeft: 12 }}>
+                {copied ? "Copied!" : "Copy link"}
+              </button>
+            </div>
 
-          <button onClick={copyLink} style={{ marginLeft: 12 }}>
-            {copied ? "Copied!" : "Copy link"}
-          </button>
-        </div>
+            <div style={{ marginTop: 6, fontSize: 12 }}>{shareLink}</div>
+          </div>
+          <div style = {{ display: "flex", gap: 30}}>
+            <div style = {{position: "relative", width: 500, height: 350, flex: "0 0 auto" }}>
+              <div
+                ref={editorRef}
+                  contentEditable
+                  suppressContentEditableWarning
+                  style={{
+                      width: 500,
+                      height: 350,
+                      border: "1px solid #ccc",
+                      borderRadius: 8,
+                      padding: 10,
+                      overflow: "auto",
+                      whiteSpace: "pre-wrap",
+                      outline: "none",
+                      fontFamily: "inherit",
+                      fontSize: "inherit",
+                  }}
+                  onKeyDown={(e) => {
+                    if(e.key === "Enter") {
+                      e.preventDefault();
+                      execWithFallback(() => document.execCommand("insertLineBreak"));
+                    }
+                  }}
+                  onPaste={(e) => {
+                    e.preventDefault();
+                    const plain = e.clipboardData.getData("text/plain")
+                    execWithFallback(() => document.execCommand("insertText", false, plain));
+                  }}
+                  onMouseUp={scheduleSendCursor}
+                  onKeyUp={scheduleSendCursor}
+                  onMouseDown={scheduleSendCursor}
+                  onInput={syncAndBroadcast}
+              />
 
-        <div style={{ marginTop: 6, fontSize: 12 }}>{shareLink}</div>
-      </div>
-      <div style = {{position: "relative", width: 650, height: 350}}>
-        <div
-          ref={editorRef}
-            contentEditable
-            suppressContentEditableWarning
-            style={{
-                width: 650,
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: 0,
+                  width: 500,
+                  height: 350,
+                  pointerEvents: "none",
+                }}
+              >
+                  {Object.entries(remoteHighlights).flatMap(([id, rects]) =>
+                      rects.map((r, i) => (
+                      <div
+                          key={`${id}-hl-${i}`}
+                          title={labelFromId(id)}
+                          style={{
+                          position: "absolute",
+                          left: r.x,
+                          top: r.y,
+                          width: r.w,
+                          height: r.h,
+                          background: colorFromId(id),
+                          opacity: 0.22,
+                          borderRadius: 3,
+                          }}
+                      />
+                      ))
+                  )}
+                  {Object.entries(remoteRects).map(([id, r]) => (
+                  <div
+                    key={id}
+                    title={labelFromId(id)}
+                    style={{
+                      position: "absolute",
+                      left: r.x,
+                      top: r.y,  
+                      width: 2,
+                      height: r.h,
+                      background: colorFromId(id),
+                      borderRadius: 2,
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div
+              style = {{
+                width: 500,
                 height: 350,
+                flex: "0 0 auto",
                 border: "1px solid #ccc",
                 borderRadius: 8,
                 padding: 10,
                 overflow: "auto",
                 whiteSpace: "pre-wrap",
-                outline: "none",
-                fontFamily: "inherit",
-                fontSize: "inherit",
-            }}
-            onKeyDown={(e) => {
-              if(e.key === "Enter") {
-                e.preventDefault();
-                execWithFallback(() => document.execCommand("insertLineBreak"));
-              }
-            }}
-            onPaste={(e) => {
-              e.preventDefault();
-              const plain = e.clipboardData.getData("text/plain")
-              execWithFallback(() => document.execCommand("insertText", false, plain));
-            }}
-            onMouseUp={scheduleSendCursor}
-            onKeyUp={scheduleSendCursor}
-            onMouseDown={scheduleSendCursor}
-            onInput={syncAndBroadcast}
-        />
-
-        <div
-          style={{
-            position: "absolute",
-            left: 0,
-            top: 0,
-            width: 650,
-            height: 350,
-            pointerEvents: "none",
-          }}
-        >
-            {Object.entries(remoteHighlights).flatMap(([id, rects]) =>
-                rects.map((r, i) => (
-                <div
-                    key={`${id}-hl-${i}`}
-                    title={labelFromId(id)}
-                    style={{
-                    position: "absolute",
-                    left: r.x,
-                    top: r.y,
-                    width: r.w,
-                    height: r.h,
-                    background: colorFromId(id),
-                    opacity: 0.22,
-                    borderRadius: 3,
-                    }}
-                />
-                ))
-            )}
-            {Object.entries(remoteRects).map(([id, r]) => (
-            <div
-              key={id}
-              title={labelFromId(id)}
-              style={{
-                position: "absolute",
-                left: r.x,
-                top: r.y,  
-                width: 2,
-                height: r.h,
-                background: colorFromId(id),
-                borderRadius: 2,
+                background: "#fff",
+                color: "#000",
               }}
+              dangerouslySetInnerHTML={{ __html: renderLatexMixed(text) }}
             />
-          ))}
+          </div>
         </div>
       </div>
     </div>
