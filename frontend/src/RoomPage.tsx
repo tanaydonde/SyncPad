@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo } from "react";
 import { useParams } from "react-router-dom";
 import "katex/dist/katex.min.css";
 import katex from "katex";
+import { useNavigate } from "react-router-dom";
 
 function escapeHtml(s: string) {
   return s
@@ -114,6 +115,8 @@ function labelFromId(id: string) {
 }
 
 export default function RoomPage() {
+  const navigate = useNavigate();
+
   const {roomId} = useParams();
   const room = roomId ?? "default"
 
@@ -393,61 +396,138 @@ export default function RoomPage() {
   return (
     <div
       style={{
+        minHeight: "100vh",
+        width: "100vw",
         background: "#1f1f1f",
+        color: "#eaeaea",
         display: "flex",
         justifyContent: "center",
-        alignItems: "center",
         padding: 40,
+        boxSizing: "border-box",
       }}
     >
-      <div style = {{width: 1030}}>
-        <div style={{ padding: 16 }}>
-          <div style={{ marginBottom: 12 }}>
-            <h2 style={{ margin: 0 }}>Room ID: {room}</h2>
-            <div style={{ marginTop: 6 }}>
-              <span>Status: {status}</span>
-              <span style={{ marginLeft: 12 }}>Users: {users}</span>
-
-              <button onClick={copyLink} style={{ marginLeft: 12 }}>
-                {copied ? "Copied!" : "Copy link"}
-              </button>
-            </div>
-
-            <div style={{ marginTop: 6, fontSize: 12 }}>{shareLink}</div>
+      <div style={{ width: 1030}}>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: 0.3 }}>
+            Room {room}
           </div>
-          <div style = {{ display: "flex", gap: 30}}>
-            <div style = {{position: "relative", width: 500, height: 350, flex: "0 0 auto" }}>
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 12,
+            marginBottom: 14,
+            padding: "10px 12px",
+            border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 10,
+            background: "rgba(255,255,255,0.04)",
+          }}
+        >
+          <button
+            onClick={() => navigate("/")}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.15)",
+              background: "rgba(255,255,255,0.06)",
+              color: "#eaeaea",
+              cursor: "pointer",
+              fontWeight: 700,
+            }}
+          >
+            Home
+          </button>
+          
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.08)",
+                fontSize: 13,
+              }}
+            >
+              Status: <span style={{ fontWeight: 600 }}>{status}</span>
+            </span>
+
+            <span
+              style={{
+                padding: "6px 10px",
+                borderRadius: 999,
+                background: "rgba(255,255,255,0.08)",
+                fontSize: 13,
+              }}
+            >
+              Users: <span style={{ fontWeight: 600 }}>{users}</span>
+            </span>
+          </div>
+
+          <button
+            onClick={copyLink}
+            style={{
+              padding: "8px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.18)",
+              background: copied ? "rgba(34,197,94,0.18)" : "rgba(255,255,255,0.08)",
+              color: "#eaeaea",
+              cursor: "pointer",
+              fontWeight: 600,
+            }}
+          >
+            {copied ? "Copied!" : "Copy link"}
+          </button>
+        </div>
+
+        <div style={{
+          display: "flex", 
+          gap: 30,
+          justifyContent: "center",
+          alignItems: "flex-start",
+          flexWrap: "wrap",
+        }}>
+          <div style={{ flex: "0 0 auto" }}>
+            <div style={{ marginBottom: 8, fontSize: 12, opacity: 0.8 }}>Editor</div>
+
+            <div style={{ position: "relative", width: 500, height: 350 }}>
               <div
                 ref={editorRef}
-                  contentEditable
-                  suppressContentEditableWarning
-                  style={{
-                      width: 500,
-                      height: 350,
-                      border: "1px solid #ccc",
-                      borderRadius: 8,
-                      padding: 10,
-                      overflow: "auto",
-                      whiteSpace: "pre-wrap",
-                      outline: "none",
-                      fontFamily: "inherit",
-                      fontSize: "inherit",
-                  }}
-                  onKeyDown={(e) => {
-                    if(e.key === "Enter") {
-                      e.preventDefault();
-                      execWithFallback(() => document.execCommand("insertLineBreak"));
-                    }
-                  }}
-                  onPaste={(e) => {
+                contentEditable
+                suppressContentEditableWarning
+                style={{
+                  width: 500,
+                  height: 350,
+                  border: "1px solid rgba(255,255,255,0.18)",
+                  borderRadius: 12,
+                  padding: 12,
+                  overflow: "auto",
+                  whiteSpace: "pre-wrap",
+                  outline: "none",
+                  background: "rgba(255,255,255,0.03)",
+                  color: "#eaeaea",
+                  boxShadow: "0 10px 28px rgba(0,0,0,0.35)",
+                  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  fontSize: 14,
+                  lineHeight: 1.5,
+                  boxSizing: "border-box",
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
                     e.preventDefault();
-                    const plain = e.clipboardData.getData("text/plain")
-                    execWithFallback(() => document.execCommand("insertText", false, plain));
-                  }}
-                  onMouseUp={scheduleSendCursor}
-                  onKeyUp={scheduleSendCursor}
-                  onMouseDown={scheduleSendCursor}
-                  onInput={syncAndBroadcast}
+                    execWithFallback(() => document.execCommand("insertLineBreak"));
+                  }
+                }}
+                onPaste={(e) => {
+                  e.preventDefault();
+                  const plain = e.clipboardData.getData("text/plain");
+                  execWithFallback(() => document.execCommand("insertText", false, plain));
+                }}
+                onMouseUp={scheduleSendCursor}
+                onKeyUp={scheduleSendCursor}
+                onMouseDown={scheduleSendCursor}
+                onInput={syncAndBroadcast}
               />
 
               <div
@@ -460,32 +540,33 @@ export default function RoomPage() {
                   pointerEvents: "none",
                 }}
               >
-                  {Object.entries(remoteHighlights).flatMap(([id, rects]) =>
-                      rects.map((r, i) => (
-                      <div
-                          key={`${id}-hl-${i}`}
-                          title={labelFromId(id)}
-                          style={{
-                          position: "absolute",
-                          left: r.x,
-                          top: r.y,
-                          width: r.w,
-                          height: r.h,
-                          background: colorFromId(id),
-                          opacity: 0.22,
-                          borderRadius: 3,
-                          }}
-                      />
-                      ))
-                  )}
-                  {Object.entries(remoteRects).map(([id, r]) => (
+                {Object.entries(remoteHighlights).flatMap(([id, rects]) =>
+                  rects.map((r, i) => (
+                    <div
+                      key={`${id}-hl-${i}`}
+                      title={labelFromId(id)}
+                      style={{
+                        position: "absolute",
+                        left: r.x,
+                        top: r.y,
+                        width: r.w,
+                        height: r.h,
+                        background: colorFromId(id),
+                        opacity: 0.22,
+                        borderRadius: 3,
+                      }}
+                    />
+                  ))
+                )}
+
+                {Object.entries(remoteRects).map(([id, r]) => (
                   <div
                     key={id}
                     title={labelFromId(id)}
                     style={{
                       position: "absolute",
                       left: r.x,
-                      top: r.y,  
+                      top: r.y,
                       width: 2,
                       height: r.h,
                       background: colorFromId(id),
@@ -495,23 +576,36 @@ export default function RoomPage() {
                 ))}
               </div>
             </div>
+          </div>
+
+          <div style={{ flex: "0 0 auto" }}>
+            <div style={{ marginBottom: 8, fontSize: 12, opacity: 0.8 }}>Preview</div>
 
             <div
-              style = {{
+              style={{
                 width: 500,
                 height: 350,
-                flex: "0 0 auto",
-                border: "1px solid #ccc",
-                borderRadius: 8,
-                padding: 10,
+                border: "1px solid rgba(0,0,0,0.12)",
+                borderRadius: 12,
+                padding: 12,
                 overflow: "auto",
                 whiteSpace: "pre-wrap",
-                background: "#fff",
-                color: "#000",
+                background: "#ffffff",
+                color: "#111827",
+                boxShadow: "0 10px 28px rgba(0,0,0,0.28)",
+                fontFamily: "system-ui, -apple-system, Segoe UI, Roboto, sans-serif",
+                fontSize: 15,
+                lineHeight: 1.6,
               }}
               dangerouslySetInnerHTML={{ __html: renderLatexMixed(text) }}
             />
           </div>
+        </div>
+
+        {/* Optional: tiny footer tip */}
+        <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7, textAlign: "center" }}>
+          Use <span style={{ fontFamily: "ui-monospace" }}>$x^2$</span> for math, or{" "}
+          <span style={{ fontFamily: "ui-monospace" }}>$\text{"{hello}"}$</span> for words.
         </div>
       </div>
     </div>
