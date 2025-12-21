@@ -1,9 +1,9 @@
 # TexPad
 
+A real-time collaborative LaTeX editor built with React, TypeScript, Go, WebSockets, and CRDTs (Yjs).
+
 ## Live Demo
 https://tanaydonde.github.io/TexPad/
-
-A real-time collaborative LaTeX editor built with React, TypeScript, Go, WebSockets, and CRDTs (Yjs).
 
 ## Features
 - Live multi-user editing
