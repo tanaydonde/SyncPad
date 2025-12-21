@@ -196,8 +196,9 @@ export default function RoomPage() {
     let attempt = 0;
 
     const connect = () => {
-      const proto = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${proto}://${window.location.hostname}:8080/ws?room=${encodeURIComponent(room)}`);
+      const WS_BASE = import.meta.env.VITE_WS_BASE ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8080`;
+
+    const ws = new WebSocket(`${WS_BASE}/ws?room=${encodeURIComponent(room)}`);
       wsRef.current = ws;
 
       ws.onopen = () => {
