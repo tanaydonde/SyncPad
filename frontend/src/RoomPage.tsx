@@ -168,7 +168,9 @@ export default function RoomPage() {
 
   const editorRef = useRef<HTMLDivElement | null>(null);
 
-  const shareLink = useMemo(() => `${window.location.origin}/room/${encodeURIComponent(room)}`, [room]);
+  const shareLink = useMemo(() => { 
+    return `${window.location.origin}${import.meta.env.BASE_URL}#/room/${encodeURIComponent(room)}`;
+  }, [room]);
 
   const clientId = useMemo(() => {
     const key = "syncpad_client_id";
