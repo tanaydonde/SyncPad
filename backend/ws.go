@@ -15,8 +15,8 @@ type EditMsg struct {
 	State string `json:"state,omitempty"`
 	Update string `json:"update,omitempty"`
 	
-	Start int `json:"start,omitempty"`
-	End int `json:"end,omitempty"`
+	Start string `json:"start,omitempty"`
+	End string `json:"end,omitempty"`
 }
 
 var upgrader = websocket.Upgrader{

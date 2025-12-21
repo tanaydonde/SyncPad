@@ -19,6 +19,18 @@ function b64ToU8(b64: string): Uint8Array {
   return u8;
 }
 
+function relToB64(ytext: Y.Text, index: number) {
+  const rel = Y.createRelativePositionFromTypeIndex(ytext, index);
+  const enc = Y.encodeRelativePosition(rel);
+  return u8ToB64(enc);
+}
+
+function b64ToAbsIndex(doc: Y.Doc, b64: string): number | null {
+  const rel = Y.decodeRelativePosition(b64ToU8(b64));
+  const abs = Y.createAbsolutePositionFromRelativePosition(rel, doc);
+  return abs ? abs.index : null;
+}
+
 function findDiff(prev: string, cur: string) {
   if(prev === cur) return null;
 
@@ -76,7 +88,7 @@ function renderLatexMixed(input: string) {
   return html;
 }
 
-type RemoteCursor = { start: number, end: number, ts: number};
+type RemoteCursor = { start: string, end: string, ts: number};
 
 type CaretRect = { x: number; y: number; h: number };
 
@@ -191,6 +203,8 @@ export default function RoomPage() {
 
   const lastTextRef = useRef<string>("");
 
+  const pendingSelRef = useRef<{ start: number; end: number } | null>(null);
+
   useEffect(() => {
     let closedByCleanup = false;
     let retryTimer: number | null = null;
@@ -218,8 +232,8 @@ export default function RoomPage() {
           ws.send(JSON.stringify({type: "y_update", clientId, update: u8ToB64(update)}));
 
           //full snapshot
-          const full = Y.encodeStateAsUpdate(doc);
-          ws.send(JSON.stringify({ type: "y_state", clientId, state: u8ToB64(full) }));
+          //const full = Y.encodeStateAsUpdate(doc);
+          //ws.send(JSON.stringify({ type: "y_state", clientId, state: u8ToB64(full) }));
           
         }
 
@@ -239,30 +253,64 @@ export default function RoomPage() {
           setUsers(msg.count);
           return;
         }
+
+        if(msg.type === "state_request") {
+          const doc = ydocRef.current;
+          if(!doc) return;
+
+          ws.send(JSON.stringify({type: "y_state", clientId, state: u8ToB64(Y.encodeStateAsUpdate(doc))}));
+          return;
+        }
         
         if(msg.type === "y_sync") {
           const doc = ydocRef.current;
-          if (!doc) return;
+          if(!doc) return;
 
-          if (msg.state) {
-            const update = b64ToU8(msg.state);
-            Y.applyUpdate(doc, update, "remote");
+          if(msg.state){
+            Y.applyUpdate(doc, b64ToU8(msg.state), "remote");
           }
+
           return;
         }
 
         if(msg.type === "y_update" && msg.clientId !== clientId) {
           const doc = ydocRef.current;
-          if (!doc) return;
+          const ytext = ytextRef.current;
+          const el = editorRef.current;
+          if (!doc || !ytext || !el) return;
+
+          const wasFocused = document.activeElement === el;
+          let relStart: string | null = null;
+          let relEnd: string | null = null;
+
+          if (wasFocused) {
+            const r = getSelectionRangeInEditor();
+            if (r) {
+              relStart = relToB64(ytext, r.start);
+              relEnd = relToB64(ytext, r.end);
+            }
+          }
 
           if (msg.update) {
             const update = b64ToU8(msg.update);
             Y.applyUpdate(doc, update, "remote");
           }
+
+          if (wasFocused && relStart && relEnd) {
+            const s = b64ToAbsIndex(doc, relStart);
+            const e = b64ToAbsIndex(doc, relEnd);
+            if (s != null && e != null) {
+              pendingSelRef.current = { start: s, end: e };
+            }
+          }
+
           return;
         }
 
         if(msg.type === "cursor" && msg.clientId !== clientId) {
+          const doc = ydocRef.current;
+          if (!doc) return;
+
           setRemoteCursors(prev => ({
             ...prev,
             [msg.clientId]: {start: msg.start, end: msg.end, ts: Date.now()}
@@ -310,14 +358,26 @@ export default function RoomPage() {
     if (!el) return;
 
     const domText = el.textContent ?? "";
-    if (domText !== text) {
-      el.textContent = text;
+    if (domText === text) return;
+
+    el.textContent = text;
+
+    const pending = pendingSelRef.current;
+
+    if(pending && document.activeElement === el) {
+      const max = text.length;
+      const s = Math.max(0, Math.min(max, pending.start));
+      const e = Math.max(0, Math.min(max, pending.end));
+      requestAnimationFrame(() => setSelectionRangeInEditor(s, e));
     }
+
+    pendingSelRef.current = null;
   }, [text]);
 
   useEffect(() => {
     const el = editorRef.current;
-    if(!el) return;
+    const doc = ydocRef.current;
+    if(!el || !doc) return;
 
     const time = Date.now();
     const ttl = 5000;
@@ -331,14 +391,18 @@ export default function RoomPage() {
     for(const [id, c] of Object.entries(remoteCursors)) {
         if(time - c.ts >= ttl) continue;
 
-        if(c.start !== c.end ) {
-            const rects = getHighlightRects(el, c.start, c.end).filter(r => 
+        const s = b64ToAbsIndex(doc, c.start);
+        const e = b64ToAbsIndex(doc, c.end);
+        if (s == null || e == null) continue; 
+
+        if(s !== e) {
+            const rects = getHighlightRects(el, s, e).filter(r => 
               r.x + r.w > 0 && r.x < W && r.y + r.h > 0 && r.y < H
             );
             if (rects.length) nextHighlights[id] = rects;
         }
         else{
-            const r = caretRectFromIndex(el, c.start);
+            const r = caretRectFromIndex(el, s);
             if(r && r.x + 2 > 0 && r.x < W && r.y + r.h > 0 && r.y < H) nextCarrets[id] = r;
         }
     }
@@ -461,9 +525,27 @@ export default function RoomPage() {
     return { start, end };
   }
 
+  function setSelectionRangeInEditor(start: number, end: number) {
+    const el = editorRef.current;
+    const sel = window.getSelection();
+    if (!el || !sel) return;
+
+    const a = getTextNodeAndOffset(el, start);
+    const b = getTextNodeAndOffset(el, end);
+
+    const range = document.createRange();
+    range.setStart(a.node, a.offset);
+    range.setEnd(b.node, b.offset);
+
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
   function sendCursorNow() {
     const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    const doc = ydocRef.current;
+    const ytext = ytextRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN || !doc || !ytext) return;
 
     const r = getSelectionRangeInEditor();
     if (!r) return;
@@ -471,8 +553,8 @@ export default function RoomPage() {
     ws.send(JSON.stringify({
       type: "cursor",
       clientId,
-      start: r.start,
-      end: r.end,
+      start: relToB64(ytext, r.start),
+      end: relToB64(ytext, r.end),
     }));
   }
 
@@ -728,7 +810,6 @@ export default function RoomPage() {
           </div>
         </div>
 
-        {/* Optional: tiny footer tip */}
         <div style={{ marginTop: 14, fontSize: 12, opacity: 0.7, textAlign: "center" }}>
           Use <span style={{ fontFamily: "ui-monospace" }}>$x^2$</span> for math, or{" "}
           <span style={{ fontFamily: "ui-monospace" }}>$\text{"{hello}"}$</span> for words.

@@ -16,8 +16,8 @@ type YStateEvent struct {
 
 type CursorEvent struct {
 	ClientID string
-	Start int
-	End int
+	Start string
+	End string
 }
 
 type Hub struct {
@@ -31,7 +31,7 @@ type Hub struct {
 
 	cursor chan CursorEvent
 	
-	currentYState string
+	pending []*websocket.Conn
 
 	users int
 }
@@ -48,7 +48,7 @@ func NewHub() *Hub {
 
 		cursor: make(chan CursorEvent),
 
-		currentYState: "",
+		pending: make([]*websocket.Conn, 0),
 
 		users: 0,
 	}
@@ -62,8 +62,8 @@ type PresenceMsg struct {
 type CursorMsg struct {
 	Type string `json:"type"`
 	ClientID string `json:"clientId"`
-	Start int `json:"start"`
-	End int `json:"end"`
+	Start string `json:"start"`
+	End string `json:"end"`
 }
 
 type CursorRequestMsg struct {
@@ -82,6 +82,9 @@ type YSyncMsg struct {
 	State string `json:"state,omitempty"`
 }
 
+type StateRequestMsg struct {
+	Type string `json:"type"`
+}
 
 func (h *Hub) sendJSON(conn *websocket.Conn, v any) error {
 	b, err := json.Marshal(v)
@@ -115,8 +118,18 @@ func (h *Hub) Run() {
 		case conn := <- h.register:
 			h.clients[conn] = true
 			h.users++
-			_ = h.sendJSON(conn, YSyncMsg{Type: "y_sync", State: h.currentYState})
 			h.broadcastPresence()
+			if len(h.clients) == 1 {
+				continue;
+			}
+
+			h.pending = append(h.pending, conn)
+			for c := range h.clients {
+				if c != conn {
+					_ = h.sendJSON(c, StateRequestMsg{Type: "state_request"})
+					break
+				}
+			}
 		
 		case conn := <- h.unregister:
 			if h.clients[conn]{
@@ -130,7 +143,14 @@ func (h *Hub) Run() {
 			h.broadcastJSON(YUpdateMsg{Type: "y_update", ClientID: update.ClientID, Update: update.Update})
 
 		case state := <- h.yState:
-			h.currentYState = state.State
+			for len(h.pending) > 0 {
+				next := h.pending[0]
+				h.pending = h.pending[1:]
+
+				if h.clients[next] {
+					_ = h.sendJSON(next, YSyncMsg{Type: "y_sync", State: state.State})
+				}
+			}
 
 		case c := <- h.cursor:
 			h.broadcastJSON(CursorMsg{Type: "cursor", ClientID: c.ClientID, Start: c.Start, End:c.End})
