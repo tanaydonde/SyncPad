@@ -9,8 +9,12 @@ import (
 
 type EditMsg struct {
 	Type string `json:"type"`
-	Text string `json:"text"`
+
 	ClientID string `json:"clientId"`
+
+	State string `json:"state,omitempty"`
+	Update string `json:"update,omitempty"`
+	
 	Start int `json:"start,omitempty"`
 	End int `json:"end,omitempty"`
 }
@@ -33,7 +37,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request){
 
 	hub := getRoomHub(room)
 
-	fmt.Println("ws client connected to room:", room)
+	//fmt.Println("ws client connected to room:", room)
 	hub.register <- conn
 
 	defer func() { hub.unregister <- conn}()
@@ -42,7 +46,7 @@ func wsHandler(w http.ResponseWriter, r *http.Request){
 		_, msg, err := conn.ReadMessage()
 
 		if err != nil {
-			fmt.Println("read error:", err)
+			//fmt.Println("read error:", err)
 			return
 		}
 
@@ -50,16 +54,18 @@ func wsHandler(w http.ResponseWriter, r *http.Request){
 		if err := json.Unmarshal(msg, &em); err != nil {
 			continue
 		}
+
 		switch(em.Type){
 		
-		case("edit"):
-			hub.broadcast <- EditEvent{Text: em.Text, ClientID: em.ClientID }
+		case("y_update"):
+			hub.yUpdate <- YUpdateEvent{ClientID: em.ClientID, Update: em.Update}
+		
+		case ("y_state"):
+			hub.yState <- YStateEvent{State: em.State}
 		
 		case("cursor"):
 			hub.cursor <- CursorEvent{ClientID: em.ClientID, Start: em.Start, End: em.End}
 		
-		case("cursor_request"):
-			hub.cursorRequest <- CursorRequestEvent{From: em.ClientID}
 		}
 		
 	}

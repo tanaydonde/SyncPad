@@ -4,6 +4,45 @@ import "katex/dist/katex.min.css";
 import katex from "katex";
 import { useNavigate } from "react-router-dom";
 
+import * as Y from 'yjs';
+
+function u8ToB64(u8: Uint8Array): string {
+  let s = "";
+  for(let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  return btoa(s);
+}
+
+function b64ToU8(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const u8 = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+  return u8;
+}
+
+function findDiff(prev: string, cur: string) {
+  if(prev === cur) return null;
+
+  let start = 0;
+  const prevLen = prev.length;
+  const curLen = cur.length;
+
+  while(start < prevLen && start < curLen && prev[start] === cur[start]){
+    start++;
+  }
+
+  let endPrev = prevLen-1;
+  let endCur = curLen-1;
+  while(endPrev >= start && endCur >= start && prev[endPrev] === cur[endCur]) {
+    endPrev--;
+    endCur--;
+  }
+
+  const deleteCount = Math.max(0, endPrev - start + 1);
+  const insertText = cur.slice(start, endCur + 1);
+  
+  return {start, deleteCount, insertText};
+}
+
 function escapeHtml(s: string) {
   return s
         .replace(/&/g, "&amp;")
@@ -145,6 +184,12 @@ export default function RoomPage() {
   const [remoteRects, setRemoteRects] = useState<Record<string, CaretRect>>({});
   const [remoteHighlights, setRemoteHighlights] = useState<Record<string, HighlightRect[]>>({});
 
+  const ydocRef = useRef<Y.Doc | null>(null);
+  const ytextRef = useRef<Y.Text | null>(null);
+
+  const lastTextRef = useRef<string>("");
+  const lastStateSentRef = useRef(0);
+
   useEffect(() => {
     let closedByCleanup = false;
     let retryTimer: number | null = null;
@@ -158,25 +203,69 @@ export default function RoomPage() {
       ws.onopen = () => {
         attempt = 0;
         setStatus("connected");
-        ws.send(JSON.stringify({ type: "cursor_request", clientId }));
         sendCursorNow();
+
+        const doc = ydocRef.current;
+        if (!doc) return;
+
+        const onUpdate = (update: Uint8Array, origin: any) => {
+          if(origin !== "local") return;
+          if (ws.readyState !== WebSocket.OPEN) return;
+          
+          //regular updates
+          ws.send(JSON.stringify({type: "y_update", clientId, update: u8ToB64(update)}));
+
+          //full snapshot
+          const full = Y.encodeStateAsUpdate(doc);
+          ws.send(JSON.stringify({ type: "y_state", clientId, state: u8ToB64(full) }));
+          
+        }
+
+        doc.on("update", onUpdate);
+
+        const cleanup = () => {
+          doc.off("update", onUpdate);
+        };
+
+        ws.addEventListener("close", cleanup, { once: true });
       }
 
       ws.onmessage = (event) => {
         const msg = JSON.parse(String(event.data));
 
-        if(msg.type === "presence"){
-          setUsers(msg.count)
-        } else if(msg.type === "doc" && msg.clientId !== clientId) {
-          setText(msg.text);
-        } else if(msg.type == "cursor" && msg.clientId !== clientId) {
+        if(msg.type === "presence") {
+          setUsers(msg.count);
+          return;
+        }
+        
+        if(msg.type === "y_sync") {
+          const doc = ydocRef.current;
+          if (!doc) return;
 
+          if (msg.state) {
+            const update = b64ToU8(msg.state);
+            Y.applyUpdate(doc, update, "remote");
+          }
+          return;
+        }
+
+        if(msg.type === "y_update" && msg.clientId !== clientId) {
+          const doc = ydocRef.current;
+          if (!doc) return;
+
+          if (msg.update) {
+            const update = b64ToU8(msg.update);
+            Y.applyUpdate(doc, update, "remote");
+          }
+          return;
+        }
+
+        if(msg.type === "cursor" && msg.clientId !== clientId) {
           setRemoteCursors(prev => ({
             ...prev,
             [msg.clientId]: {start: msg.start, end: msg.end, ts: Date.now()}
           }));
-        } else if(msg.type === "cursor_request" && msg.from !== clientId) {
-            sendCursorNow();
+          return;
         }
       }
 
@@ -287,6 +376,32 @@ export default function RoomPage() {
   }, [])
 
   useEffect(() => {
+    const doc = new Y.Doc();
+    const ytext = doc.getText("content");
+
+    ydocRef.current = doc;
+    ytextRef.current = ytext;
+
+    const onChange = () => {
+      const s = ytext.toString();
+      lastTextRef.current = s;
+      setText(s);
+    };
+
+    ytext.observe(onChange);
+
+    onChange();
+
+    return () => {
+      ytext.unobserve(onChange);
+      doc.destroy();
+      ydocRef.current = null;
+      ytextRef.current = null;
+    };
+
+  }, [])
+
+  useEffect(() => {
     const ws = wsRef.current;
     if (!ws || status !== "connected") return;
 
@@ -363,21 +478,23 @@ export default function RoomPage() {
 
   function syncAndBroadcast(){
     const el = editorRef.current;
-    if (!el) return;
+    const doc = ydocRef.current;
+    const ytext = ytextRef.current;
+    if (!el || !doc || !ytext) return;
 
-    const newText = el.textContent ?? "";
-    
-    if(newText === text) {
+    const cur = el.textContent ?? "";
+    const prev = lastTextRef.current;
+
+    const d = findDiff(prev, cur);
+    if(!d) {
       scheduleSendCursor();
       return;
     }
-    
-    setText(newText);
 
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "edit", text: newText, clientId }));
-    }
+    doc.transact(() => {
+      if(d.deleteCount > 0) ytext.delete(d.start, d.deleteCount);
+      if(d.insertText.length > 0) ytext.insert(d.start, d.insertText);
+    }, "local")
 
     scheduleSendCursor();
   }
@@ -389,7 +506,7 @@ export default function RoomPage() {
       if (!el) return;
 
       const domText = el.textContent ?? "";
-      if (domText !== text) syncAndBroadcast();
+      if (domText !== lastTextRef.current) syncAndBroadcast();
     })
   }
 

@@ -5,9 +5,13 @@ import(
 	"github.com/gorilla/websocket"
 )
 
-type EditEvent struct {
-	Text string
+type YUpdateEvent struct {
 	ClientID string
+	Update string
+}
+
+type YStateEvent struct {
+	State string
 }
 
 type CursorEvent struct {
@@ -16,43 +20,38 @@ type CursorEvent struct {
 	End int
 }
 
-type CursorRequestEvent struct {
-	From string
-}
-
-type CursorRequestMsg struct {
-	Type string `json:"type"`
-	From string `json:"from"`
-}
-
 type Hub struct {
 	clients map[*websocket.Conn]bool
+
 	register chan *websocket.Conn
 	unregister chan *websocket.Conn
-	broadcast chan EditEvent
+
+	yUpdate chan YUpdateEvent
+	yState chan YStateEvent
+
 	cursor chan CursorEvent
-	cursorRequest chan CursorRequestEvent
-	currentText string
+	
+	currentYState string
+
 	users int
 }
 
 func NewHub() *Hub {
 	return &Hub{
 		clients: make(map[*websocket.Conn]bool),
+
 		register: make(chan *websocket.Conn),
 		unregister: make(chan *websocket.Conn),
-		broadcast: make(chan EditEvent),
+
+		yUpdate: make(chan YUpdateEvent),
+		yState: make(chan YStateEvent),
+
 		cursor: make(chan CursorEvent),
-		cursorRequest: make(chan CursorRequestEvent),
-		currentText: "",
+
+		currentYState: "",
+
 		users: 0,
 	}
-}
-
-type DocMsg struct {
-	Type string `json:"type"`
-	Text string `json:"text"`
-	ClientID string `json:"clientId"`
 }
 
 type PresenceMsg struct {
@@ -65,6 +64,22 @@ type CursorMsg struct {
 	ClientID string `json:"clientId"`
 	Start int `json:"start"`
 	End int `json:"end"`
+}
+
+type CursorRequestMsg struct {
+	Type string `json:"type"`
+	From string `json:"from"`
+}
+
+type YUpdateMsg struct {
+	Type string `json:"type"`
+	ClientID string `json:"clientId"`
+	Update string `json:"update"`
+}
+
+type YSyncMsg struct {
+	Type string `json:"type"`
+	State string `json:"state,omitempty"`
 }
 
 
@@ -100,7 +115,7 @@ func (h *Hub) Run() {
 		case conn := <- h.register:
 			h.clients[conn] = true
 			h.users++
-			_ = h.sendJSON(conn, DocMsg{Type: "doc", Text: h.currentText, ClientID: ""})
+			_ = h.sendJSON(conn, YSyncMsg{Type: "y_sync", State: h.currentYState})
 			h.broadcastPresence()
 		
 		case conn := <- h.unregister:
@@ -110,16 +125,16 @@ func (h *Hub) Run() {
 				h.users--
 				h.broadcastPresence()
 			}
-		
-		case msg := <- h.broadcast:
-			h.currentText = msg.Text
-			h.broadcastJSON(DocMsg{Type: "doc", Text: h.currentText, ClientID: msg.ClientID})
+
+		case update := <- h.yUpdate:
+			h.broadcastJSON(YUpdateMsg{Type: "y_update", ClientID: update.ClientID, Update: update.Update})
+
+		case state := <- h.yState:
+			h.currentYState = state.State
 
 		case c := <- h.cursor:
 			h.broadcastJSON(CursorMsg{Type: "cursor", ClientID: c.ClientID, Start: c.Start, End:c.End})
 
-		case req := <- h.cursorRequest:
-			h.broadcastJSON(CursorRequestMsg{Type: "cursor_request", From: req.From})
 		}
 	}
 }
