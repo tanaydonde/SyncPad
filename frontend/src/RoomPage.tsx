@@ -160,7 +160,7 @@ export default function RoomPage() {
   const room = roomId ?? "default"
 
   const [text, setText] = useState("");
-  const [status, setStatus] = useState("disconnected");
+  const [status, setStatus] = useState("connecting...");
   const wsRef = useRef<WebSocket | null>(null);
 
   const [copied, setCopied] = useState(false);
@@ -418,6 +418,13 @@ export default function RoomPage() {
     
   }, [status, room, clientId]);
 
+  useEffect(() => {
+    document.title = `TexPad - ${room}`;
+    return () => {
+      document.title = "TexPad";
+    };
+  }, [room]);
+
   async function copyLink() {
     try{
       await navigator.clipboard.writeText(shareLink);
@@ -528,7 +535,7 @@ export default function RoomPage() {
       <div style={{ width: 1030}}>
         <div style={{ textAlign: "center", marginBottom: 18 }}>
           <div style={{ fontSize: 34, fontWeight: 700, letterSpacing: 0.3 }}>
-            Room {room}
+            Room: {room}
           </div>
         </div>
 
