@@ -2,7 +2,7 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	//"fmt"
 	"net/http"
 	"github.com/gorilla/websocket"
 )
@@ -26,7 +26,7 @@ var upgrader = websocket.Upgrader{
 func wsHandler(w http.ResponseWriter, r *http.Request){
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		fmt.Println("upgrade error:", err)
+		//fmt.Println("upgrade error:", err)
 		return
 	}
 

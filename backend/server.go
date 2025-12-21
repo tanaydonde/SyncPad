@@ -1,19 +1,22 @@
 package main
 
 import(
-	"fmt"
 	"net/http"
+	"log"
+	"os"
 )
 
 func StartServer() {
-	fs := http.FileServer(http.Dir("./frontend"))
-	http.Handle("/", fs)
-
 	http.HandleFunc("/ws", wsHandler)
 
-	fmt.Println("Listening on http://localhost:8080")
-    err := http.ListenAndServe(":8080", nil)
-    if err != nil {
-        fmt.Println("Error starting server:", err)
-    }
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	addr := ":" + port
+	log.Println("Listening on", addr)
+	if err := http.ListenAndServe(addr, nil); err != nil {
+		log.Fatal("server error:", err)
+	}
 }
