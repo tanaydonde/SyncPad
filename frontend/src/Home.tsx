@@ -24,10 +24,6 @@ export default function Home() {
     goToRoom(id);
   }
 
-  function handleRandom() {
-    goToRoom(randomRoomId());
-  }
-
   return (
     <div
       style={{

@@ -188,7 +188,6 @@ export default function RoomPage() {
   const ytextRef = useRef<Y.Text | null>(null);
 
   const lastTextRef = useRef<string>("");
-  const lastStateSentRef = useRef(0);
 
   useEffect(() => {
     let closedByCleanup = false;
